@@ -1,0 +1,57 @@
+---
+title: "Untitled"
+author: "Leonardo Shu"
+date: "April 25, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r cars}
+library(fields)
+library(maptools)
+library(RColorBrewer)
+library(classInt)
+devtools::install_github("dkahle/ggmap")
+library(ggplot2)
+library(ggmap)
+library(maps)
+library(mapdata)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+usa <- map_data("usa") # we already did this, but we can do it again
+ggplot() + geom_polygon(data = usa, aes(x=long, y = lat, group = group)) + 
+  coord_fixed(1.3)
+
+states <- map_data("state")
+bayArea <- subset(states, region %in% c("california"))
+ggplot(data = bayArea) + 
+  geom_polygon(aes(x = long, y = lat, group = group), fill = "palegreen", color = "black") + 
+  coord_fixed(1.3) 
+
+ca_df <- subset(states, region == "california")
+
+counties <- map_data("county")
+ca_county <- subset(counties, region == "california")
+
+ca_base <- ggplot(data = ca_df, mapping = aes(x = long, y = lat, group = group)) + 
+  coord_fixed(1.3) + 
+  geom_polygon(color = "black", fill = "gray")
+ca_base + theme_nothing()
+
+ca_base + theme_nothing() + 
+  geom_polygon(data = ca_county, fill = NA, color = "white") +
+  geom_polygon(color = "black", fill = NA)  # get the state border back on top
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
