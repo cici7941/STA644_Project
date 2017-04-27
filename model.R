@@ -36,10 +36,11 @@ cells = which(!is.na(bay[]))
 pred_coords = xyFromCell(r, cells)
 coords = dplyr::select(agg, long, lat) %>% as.matrix()
 tps = Tps(x = coords, Y=agg$`Number of Trips`)
-pm25_pred = r
-pm25_pred[cells] = predict(tps, pred_coords)
+bay_pred = r
+bay_pred[cells] = predict(tps, pred_coords)
 
-plot(pm25_pred)
+plot(bay_pred)
 points(coords, pch=16, cex=0.5)
 #library(ggplot2)
-#ggplot(pm25_pred, aes(long,lat))+geom_raster(aes(fill = values))
+ggplot(bay_pred, aes(long,lat))+geom_raster(aes(fill = values))
+
