@@ -33,7 +33,9 @@ agg2 = agg %>% group_by(`Start Terminal`, day_of_week, hour_of_day, lat, long) %
 
 agg7_15 = agg2 %>% filter(day_of_week==2 & hour_of_day==10)
 
-agg3 = agg %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = mean(`Number of Trips`))
+agg_year = agg %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = sum(`Number of Trips`))
+
+agg_day = agg %>% group_by(`Start Terminal`, day_of_week, lat, long) %>% summarise(total = sum(`Number of Trips`)) %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = mean(total))
 
 counties <- map_data("county")
 ca_county <- subset(counties, region == "california")
@@ -59,10 +61,12 @@ bay_points <- rasterize(rbind(sf_points,sm_points,sc_points),r)
 cells = which(!is.na(bay_points[]))
 pred_coords = xyFromCell(r, cells)
 
-coords = agg3[,c('long','lat')] %>% as.matrix()
-tps = Tps(x = coords, Y=agg3$avg)
+coords = agg_year[,c('long','lat')] %>% as.matrix()
+tps = Tps(x = coords, Y=agg_year$avg)
 trip_pred = r
-trip_pred[cells] = predict(tps, pred_coords)
+pred <- predict(tps, pred_coords)
+pred[pred<0] <- 0
+trip_pred[cells] = pred
 plot(trip_pred,cex = 0.8)
 points(unique(coords), pch=16, cex=0.5)
 
