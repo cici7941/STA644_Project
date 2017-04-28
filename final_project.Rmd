@@ -15,19 +15,25 @@ library(ggplot2)
 library(sf)
 trip <- fread("201508_trip_data.csv")
 station <- fread("201508_station_data.csv")
+df = trip %>%
+  mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
+  mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
+  group_by(`Start Terminal`, date, hour_of_day) %>%
+  summarise(`Number of Trips` = n())
+
 # df = trip %>% 
 #   mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
 #   mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
-#   group_by(`Start Terminal`, date, hour_of_day) %>%
+#   group_by(`End Terminal`, date, hour_of_day) %>%
 #   summarise(`Number of Trips` = n())
 
-df = trip %>% 
-  mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
-  mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
-  group_by(`End Terminal`, date, hour_of_day) %>%
-  summarise(`Number of Trips` = n())
+agg = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>% mutate(day_of_week = wday(date))
 
-agg = merge(df, station, by.x = 'End Terminal', by.y = 'station_id') %>% mutate(day_of_week = wday(date))
+agg2 = agg %>% group_by(`Start Terminal`, day_of_week, hour_of_day, lat, long) %>% summarise(avg = mean(`Number of Trips`))
+
+agg7_15 = agg2 %>% filter(day_of_week==2 & hour_of_day==10)
+
+agg3 = agg %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = mean(`Number of Trips`))
 
 counties <- map_data("county")
 ca_county <- subset(counties, region == "california")
@@ -44,7 +50,7 @@ sm_sample <- st_sample(sm_poly,1000)
 sc_poly <- st_polygon(list(sc))
 sc_sample <- st_sample(sc_poly,3000)
 
-r = raster(nrows=10, ncol=20, xmn = min(bay_county$long), xmx = max(bay_county$long),ymn = min(bay_county$lat), ymx = max(bay_county$lat))
+r = raster(nrows=30, ncol=60, xmn = min(bay_county$long), xmx = max(bay_county$long),ymn = min(bay_county$lat), ymx = max(bay_county$lat))
 
 sf_points <- rbind(matrix(unlist(sf_sample),ncol = 2, byrow = TRUE), matrix(unlist(sf_poly),ncol = 2, byrow = TRUE))
 sm_points <- rbind(matrix(unlist(sm_sample),ncol = 2, byrow = TRUE), matrix(unlist(sm_poly),ncol = 2, byrow = TRUE))
@@ -53,10 +59,11 @@ bay_points <- rasterize(rbind(sf_points,sm_points,sc_points),r)
 cells = which(!is.na(bay_points[]))
 pred_coords = xyFromCell(r, cells)
 
-coords = agg %>% dplyr::select(long, lat) %>% as.matrix()
-tps = Tps(x = coords, Y=agg$`Number of Trips`)
+coords = agg3[,c('long','lat')] %>% as.matrix()
+tps = Tps(x = coords, Y=agg3$avg)
 trip_pred = r
-trip_pred[cells] = predict(tps, sf_pred_coords)
+trip_pred[cells] = predict(tps, pred_coords)
 plot(trip_pred,cex = 0.8)
 points(unique(coords), pch=16, cex=0.5)
+
 ```
