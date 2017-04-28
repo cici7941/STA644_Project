@@ -22,7 +22,116 @@ library(ggplot2)
 library(ggmap)
 library(maps)
 library(mapdata)
+
+library(raster)
+library(magrittr)
+library(modelr)
+library(ggplot2)
+library(tidyr)
+library(rjags)
+library(stringr)
+library(gridExtra)
+library(readr)
+library(purrr)
+library(forcats)
+library(forecast)
+library(astsa)
+library(fields)
+library(readr)
+library(sf)
+library(forcats)
+library(dplyr)
 ```
+
+```{r}
+theme_set(
+  theme_bw()  
+)
+
+get_coda_parameter = function(coda, pattern)
+{
+  w = coda[[1]] %>% colnames() %>% str_detect(pattern)
+  coda[[1]][,w,drop=FALSE]
+}
+
+post_summary = function(m, ci_width=0.95)
+{
+  d = data_frame(
+    post_mean  = apply(m, 2, mean),
+    post_med   = apply(m, 2, median),
+    post_lower = apply(m, 2, quantile, probs=(1-ci_width)/2),
+    post_upper = apply(m, 2, quantile, probs=1 - (1-ci_width)/2)
+  )
+  
+  if (!is.null(colnames(m)))
+    d = d %>% mutate(param = colnames(m)) %>% select(param,post_mean:post_upper)
+  
+  d
+}
+
+strip_attrs = function(obj)
+{
+  attributes(obj) = NULL
+  obj
+}
+
+strip_class = function(obj)
+{
+  attr(obj,"class") = NULL
+  obj
+}
+```
+
+```{r}
+install.packages("magic")
+install.packages("spBayes")
+library(spBayes)
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(stringr)
+
+trip = fread('201508_trip_data.csv')
+station = fread('201508_station_data.csv')
+#status <-fread("babs_open_data_year_2/201508_status_data.csv")
+head(trip)
+df = trip %>% 
+  mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
+  mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
+  group_by(`Start Terminal`, date, hour_of_day) %>%
+  summarise(`Number of Trips` = n())
+
+agg = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>%
+  mutate(day_of_week = wday(date))
+
+
+library(fields)
+library(maps)
+states <- map_data("state")
+bayArea <- subset(states, region %in% c("california"))
+
+counties <- map_data("county")
+ca_county <- subset(counties, region == "california")
+bay_name <- c("san francisco", "san mateo","santa clara")
+bay_county <- subset(ca_county,subregion %in% bay_name)
+
+r = raster(nrows=50, ncol=100,
+           xmn = min(bay_county$long), xmx = max(bay_county$long),
+           ymn = min(bay_county$lat), ymx = max(bay_county$lat))
+bay = rasterize(bay_county[,c('long','lat')],r)
+cells = which(!is.na(bay[]))
+pred_coords = xyFromCell(r, cells)
+coords = dplyr::select(agg, long, lat) %>% as.matrix()
+tps = Tps(x = coords, Y=agg$`Number of Trips`)
+bay_pred = r
+bay_pred[cells] = predict(tps, pred_coords)
+
+plot(bay_pred)
+points(coords, pch=16, cex=0.5)
+#library(ggplot2)
+ggplot(bay_pred, aes(long,lat))+geom_raster(aes(fill = values))
+```
+
 
 ## Including Plots
 
@@ -52,6 +161,30 @@ ca_base + theme_nothing()
 ca_base + theme_nothing() + 
   geom_polygon(data = ca_county, fill = NA, color = "white") +
   geom_polygon(color = "black", fill = NA)  # get the state border back on top
+
+n = nrow(agg)
+n_samp = 20000
+coords = select(agg, long, lat) %>% as.matrix()
+dim(coords)
+coords2 = coords[1:10000,]
+
+max_range = max(dist(coords2)) / 4
+
+
+starting = list(phi = 3/3, sigma.sq = 33, tau.sq = 17)
+tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+priors = list(
+  beta.Norm = list(0, 1000), 
+  phi.Unif = c(6,3/max_range), 
+  sigma.sq.IG = c(2, 2), 
+  tau.sq.IG = c(2, 2)
+)
+
+dim(coords2)
+
+m = spLM(`Number of Trips` ~ 1, data = agg[1:10000,], coords = coords2, starting = starting, priors = priors, 
+         cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+         n.report = n_samp/2)
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
