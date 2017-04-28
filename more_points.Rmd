@@ -1,0 +1,66 @@
+---
+title: "final project"
+author: "Yulin Lei"
+date: "4/25/2017"
+output: html_document
+---
+```{r}
+library(data.table)
+library(fields)
+library(dplyr)
+library(lubridate)
+library(raster)
+library(stringr)
+library(ggplot2)
+library(sf)
+trip <- fread("201508_trip_data.csv")
+station <- fread("201508_station_data.csv")
+df = trip %>% 
+  mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
+  mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
+  group_by(`Start Terminal`, date, hour_of_day) %>%
+  summarise(`Number of Trips` = n())
+
+agg = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>% mutate(day_of_week = wday(date))
+
+counties <- map_data("county")
+ca_county <- subset(counties, region == "california")
+bay_name <- c("san francisco", "san mateo","santa clara")
+bay_county <- subset(ca_county,subregion %in% bay_name)
+sf <- subset(ca_county,subregion %in% "san francisco") %>% dplyr::select(long, lat) %>% as.matrix()
+sm <- subset(ca_county,subregion %in% "san mateo") %>% dplyr::select(long, lat) %>% as.matrix()
+sc <- subset(ca_county,subregion %in% "santa clara") %>% dplyr::select(long, lat) %>% as.matrix()
+
+sf_poly <- st_polygon(list(sf))
+sf_sample <- st_sample(sf_poly,100)
+sm_poly <- st_polygon(list(sm))
+sm_sample <- st_sample(sm_poly,100)
+sc_poly <- st_polygon(list(sc))
+sc_sample <- st_sample(sc_poly,100)
+
+r = raster(nrows=100, ncol=200, xmn = min(bay_county$long), xmx = max(bay_county$long),ymn = min(bay_county$lat), ymx = max(bay_county$lat))
+
+sf_points <- rbind(matrix(unlist(sf_sample),ncol = 2, byrow = TRUE), matrix(unlist(sf_poly),ncol = 2, byrow = TRUE))
+sf <- rasterize(sf_points,r)
+cells = which(!is.na(sf[]))
+sf_pred_coords = xyFromCell(r, cells)
+
+sm_points <- rbind(matrix(unlist(sm_sample),ncol = 2, byrow = TRUE), matrix(unlist(sm_poly),ncol = 2, byrow = TRUE))
+sm <- rasterize(sm_points,r)
+cells = which(!is.na(sm[]))
+sm_pred_coords = xyFromCell(r, cells)
+
+sc_points <- rbind(matrix(unlist(sc_sample),ncol = 2, byrow = TRUE), matrix(unlist(sc_poly),ncol = 2, byrow = TRUE))
+sc <- rasterize(sc_points,r)
+cells = which(!is.na(sc[]))
+sc_pred_coords = xyFromCell(r, cells)
+
+pred_coords <- rbind(sf_pred_coords,sm_pred_coords,sc_pred_coords)
+
+coords = agg %>% dplyr::select(long, lat) %>% as.matrix()
+tps = Tps(x = coords, Y=agg$`Number of Trips`)
+trip_pred = r
+trip_pred[cells] = predict(tps, pred_coords)
+plot(trip_pred)
+points(coords, pch=16, cex=0.5)
+```
