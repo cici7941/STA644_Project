@@ -21,21 +21,13 @@ df = trip %>%
   group_by(`Start Terminal`, date, hour_of_day) %>%
   summarise(`Number of Trips` = n())
 
-# df = trip %>% 
-#   mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
-#   mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
-#   group_by(`End Terminal`, date, hour_of_day) %>%
-#   summarise(`Number of Trips` = n())
-
 agg = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>% mutate(day_of_week = wday(date))
 
-agg2 = agg %>% group_by(`Start Terminal`, day_of_week, hour_of_day, lat, long) %>% summarise(avg = mean(`Number of Trips`))
-
-agg7_15 = agg2 %>% filter(day_of_week==2 & hour_of_day==10)
+agg_hour = agg %>% group_by(`Start Terminal`, hour_of_day, lat, long) %>% summarise(avg = mean(`Number of Trips`))
 
 agg_year = agg %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = sum(`Number of Trips`))
 
-agg_day = agg %>% group_by(`Start Terminal`, day_of_week, lat, long) %>% summarise(total = sum(`Number of Trips`)) %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = mean(total))
+agg_day = agg %>% group_by(`Start Terminal`,date, day_of_week, lat, long) %>% summarise(total = sum(`Number of Trips`)) %>% group_by(`Start Terminal`, day_of_week, lat, long) %>% summarise(avg = mean(total))
 
 counties <- map_data("county")
 ca_county <- subset(counties, region == "california")
@@ -61,8 +53,9 @@ bay_points <- rasterize(rbind(sf_points,sm_points,sc_points),r)
 cells = which(!is.na(bay_points[]))
 pred_coords = xyFromCell(r, cells)
 
-coords = agg_year[,c('long','lat')] %>% as.matrix()
-tps = Tps(x = coords, Y=agg_year$avg)
+agg1 = agg_hour %>% filter(hour_of_day==23)
+coords = agg1[,c('long','lat')] %>% as.matrix()
+tps = Tps(x = coords, Y=agg1$avg)
 trip_pred = r
 pred <- predict(tps, pred_coords)
 pred[pred<0] <- 0
