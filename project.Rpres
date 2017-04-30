@@ -15,6 +15,12 @@ Outline
 Introduction to Data
 ========================================================
 
+Station(70 records)  
+- station ID, name, latitude, longitude, dockcount, city, installation date)  
+
+Trip(approx. 354,000 records of individual trips)  
+- trip ID, duration, start date, start station, start terminal, end date, end station, end terminal, bike, subscription type, zip code  
+
 Exploratory Data Analaysis
 ========================================================
 ```{r load packages, echo = F}
@@ -64,6 +70,22 @@ ca_county <- subset(counties, region == "california")
 bay_name <- c("san francisco", "san mateo","santa clara")
 bay_county <- subset(ca_county,subregion %in% bay_name)
 
+ggplot(bay_county)+geom_polygon(aes(long,lat,group = group, fill = subregion))
+ggplot(agg_year, aes(long,lat)) + stat_bin_2d(bins = 50) + 
+  xlim(min(bay_county$long), max(bay_county$long)) +
+  ylim(min(bay_county$lat), max(bay_county$lat)) +
+  scale_fill_gradientn(colours = rev(terrain.colors(6)))
+
+```
+
+
+
+
+Model I: Thin Plate Splines(TPS)
+========================================================
+
+```{r, echo = FALSE}
+
 sf <- subset(ca_county,subregion %in% "san francisco") %>% dplyr::select(long, lat) %>% as.matrix()
 sm <- subset(ca_county,subregion %in% "san mateo") %>% dplyr::select(long, lat) %>% as.matrix()
 sc <- subset(ca_county,subregion %in% "santa clara") %>% dplyr::select(long, lat) %>% as.matrix()
@@ -84,12 +106,6 @@ bay_points <- rasterize(rbind(sf_points,sm_points,sc_points),r)
 cells = which(!is.na(bay_points[]))
 pred_coords = xyFromCell(r, cells)
 
-# 
-# agg3 = agg %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = mean(`Number of Trips`))
-
-# ggplot(bay_county)+geom_polygon(aes(long,lat,group = group, fill = subregion))
-# ggplot(agg3, aes(long,lat)) + stat_bin_2d(bins = 50) + 
-#   xlim(min(bay_county$long), max(bay_county$long))
 
 
 ```
