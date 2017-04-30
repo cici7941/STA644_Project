@@ -26,8 +26,12 @@ library(raster)
 library(stringr)
 library(ggplot2)
 library(sf)
-trip <- fread("201508_trip_data.csv")
-station <- fread("201508_station_data.csv")
+library(fields)
+library(geoR)
+library(spBayes)
+
+trip <- fread("babs_open_data_year_2/201508_trip_data.csv")
+station <- fread("babs_open_data_year_2/201508_station_data.csv")
 df = trip %>%
   mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
   mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
@@ -106,6 +110,113 @@ points(unique(coords), pch=16, cex=0.5)
 
 Model II: Gaussian Process
 ========================================================
+```{r,echo=FALSE}
+dow = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>%
+  mutate(day_of_week = wday(date))  %>%
+  group_by(`Start Terminal`, day_of_week, lat, long) %>% 
+  summarise(avg = mean(`Number of Trips`))
+
+
+df2 = trip %>% 
+  mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
+  mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
+  group_by(`Start Terminal`, date, hour_of_day) %>%
+  summarise(`Number of Trips` = n())
+
+hod = merge(df2, station, by.x = 'Start Terminal', by.y = 'station_id') %>%
+  mutate(day_of_week = wday(date))  %>%
+  group_by(`Start Terminal`, day_of_week, hour_of_day, lat, long) %>% 
+  summarise(avg = mean(`Number of Trips`))
+
+overall = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>%
+  group_by(`Start Terminal`, lat, long) %>% 
+  summarise(total = sum(`Number of Trips`))
+
+post_summary = function(m, ci_width=0.95)
+{
+  d = data_frame(
+    post_mean  = apply(m, 2, mean),
+    post_med   = apply(m, 2, median),
+    post_lower = apply(m, 2, quantile, probs=(1-ci_width)/2),
+    post_upper = apply(m, 2, quantile, probs=1 - (1-ci_width)/2)
+  )
+  
+  if (!is.null(colnames(m)))
+    d = d %>% mutate(param = colnames(m)) %>% select(param,post_mean:post_upper)
+  
+  d
+}
+
+```
 
 Result of GPs
 ========================================================
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+log = capture.output({
+#model for overall
+coords = overall[,c('long', 'lat')] %>% as.matrix()
+d = dist(coords) %>% as.matrix()
+# variog(coords = coords, data = overall$total, messages = FALSE, uvec = seq(0, max(d)/4, length.out=50)) %>% plot()
+
+max_range = max(dist(coords)) / 4
+n_samp = 20000
+starting = list(phi = 3/0.025, sigma.sq = 3e7, tau.sq = 1e7)
+tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+priors = list(
+  beta.Norm = list(0, 1000), 
+  phi.Unif = c(3/max_range,200), 
+  sigma.sq.IG = c(2, 2e7), 
+  tau.sq.IG = c(2, 2e7)
+)
+m = spLM(total ~ 1, data = overall, coords = coords, starting = starting, priors = priors, 
+         cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+         n.report = n_samp/2)
+m_pred = spPredict(m, pred_coords, pred.covars = matrix(1, nrow=nrow(pred_coords)), 
+                   start=n_samp/2+1, thin=(n_samp/2)/1000)
+m_pred_summary = post_summary(t(m_pred$p.y.predictive.samples))
+
+splm_pred = r
+splm_pred[cells] = m_pred_summary$post_mean
+
+})
+plot(splm_pred)
+points(coords, pch=16, cex=0.5)
+```
+
+
+Day of Week
+====================================================
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=14}
+#model for dow
+par(mfrow = c(2,7))
+for(i in 1:7){
+  log = capture.output({
+  day = filter(dow, day_of_week==i)
+  coords = day[,c('long', 'lat')] %>% as.matrix()
+  d = dist(coords) %>% as.matrix()
+  # variog(coords = coords, data = day$avg, messages = FALSE, uvec = seq(0, max(d)/4, length.out=50)) %>% plot()
+  max_range = max(dist(coords)) / 4
+  n_samp = 20000
+  starting = list(phi = 3/0.025, sigma.sq = 300, tau.sq = 100)
+  tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+  priors = list(
+    beta.Norm = list(0, 1000), 
+    phi.Unif = c(3/max_range,200), 
+    sigma.sq.IG = c(2, 200), 
+    tau.sq.IG = c(2, 200)
+  )
+  m = spLM(avg ~ 1, data = day, coords = coords, starting = starting, priors = priors, 
+         cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+         n.report = n_samp/2)
+
+m_pred = spPredict(m, pred_coords, pred.covars = matrix(1, nrow=nrow(pred_coords)), 
+                   start=n_samp/2+1, thin=(n_samp/2)/1000)
+m_pred_summary = post_summary(t(m_pred$p.y.predictive.samples))
+
+splm_pred = r
+splm_pred[cells] = m_pred_summary$post_mean})
+plot(splm_pred)
+points(coords, pch=16, cex=0.5)
+}
+```
+
