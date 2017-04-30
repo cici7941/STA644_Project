@@ -31,7 +31,7 @@ library(geoR)
 library(spBayes)
 ```
 
-```{r data preparation, echo=FALSE}
+```{r data preparation, echo=FALSE,cache=TRUE}
 trip <- fread("babs_open_data_year_2/201508_trip_data.csv")
 station <- fread("babs_open_data_year_2/201508_station_data.csv")
 
@@ -58,7 +58,7 @@ agg_year = agg %>%
   summarise(avg = sum(`Number of Trips`))
 ```
 
-```{r get coordinates for prediction, echo=FALSE}
+```{r get coordinates for prediction, echo=FALSE, cache=TRUE}
 counties <- map_data("county")
 ca_county <- subset(counties, region == "california")
 bay_name <- c("san francisco", "san mateo","santa clara")
@@ -117,7 +117,7 @@ Result of TPS
 
 Model II: Gaussian Process
 ========================================================
-```{r,echo=FALSE}
+```{r, echo=FALSE, cache=TRUE}
 post_summary = function(m, ci_width=0.95)
 {
   d = data_frame(
@@ -136,7 +136,7 @@ post_summary = function(m, ci_width=0.95)
 
 Result of GPs
 ========================================================
-```{r, echo=FALSE, message = FALSE, warning=FALSE}
+```{r, echo=FALSE, message = FALSE, warning=FALSE, cache=TRUE}
 log = capture.output({
 #model for overall
 coords = agg_year[,c('long', 'lat')] %>% as.matrix()
@@ -171,7 +171,7 @@ points(coords, pch=16, cex=0.5)
 
 Day of Week
 ====================================================
-```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20,fig.height=10}
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20, fig.height=10, cache=TRUE}
 #model for dow
 par(mfrow = c(2,4))
 for(i in c(2:6,7,1)){
@@ -208,7 +208,7 @@ points(coords, pch=16, cex=0.5)
 
 Day of Week
 ==============================
-```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20,fig.height=10}
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20, fig.height=10, cache=TRUE}
 #model for dow
 par(mfrow = c(2,4))
 for(i in c(2:6,7,1)){
@@ -224,5 +224,46 @@ for(i in c(2:6,7,1)){
     plot(trip_pred,cex = 0.8)
     points(coords, pch=16, cex=0.5)
 }
+```
+
+Overall 
+=============================
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=18, fig.height=10, cache=TRUE}
+par(mfrow = c(1,2))
+log = capture.output({
+    coords = agg_year[,c('long','lat')] %>% as.matrix()
+    d = dist(coords) %>% as.matrix()
+  # variog(coords = coords, data = day$avg, messages = FALSE, uvec = seq(0, max(d)/4, length.out=50)) %>% plot()
+  max_range = max(dist(coords)) / 4
+  n_samp = 20000
+  starting = list(phi = 3/0.025, sigma.sq = 300, tau.sq = 100)
+  tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+  priors = list(
+    beta.Norm = list(0, 1000), 
+    phi.Unif = c(3/max_range,200), 
+    sigma.sq.IG = c(2, 200), 
+    tau.sq.IG = c(2, 200)
+  )
+  m = spLM(avg ~ 1, data = agg_year, coords = coords, starting = starting, priors = priors, 
+         cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+         n.report = n_samp/2)
+
+m_pred = spPredict(m, pred_coords, pred.covars = matrix(1, nrow=nrow(pred_coords)), 
+                   start=n_samp/2+1, thin=(n_samp/2)/1000)
+m_pred_summary = post_summary(t(m_pred$p.y.predictive.samples))
+
+splm_pred = r
+splm_pred[cells] = m_pred_summary$post_mean
+    #tps
+    tps = Tps(x = coords, Y=agg_year$avg)
+    trip_pred = r
+    pred <- predict(tps, pred_coords)
+    pred[pred<0] <- 0
+    trip_pred[cells] = pred
+})
+    plot(splm_pred)
+    points(coords, pch=16, cex=0.5)
+    plot(trip_pred,cex = 0.8)
+    points(coords, pch=16, cex=0.5)
 ```
 
