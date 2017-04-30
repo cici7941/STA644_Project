@@ -15,9 +15,15 @@ Outline
 Introduction to Data
 ========================================================
 
+Station(70 records)  
+- station ID, name, latitude, longitude, dockcount, city, installation date)  
+
+Trip(approx. 354,000 records of individual trips)  
+- trip ID, duration, start date, start station, start terminal, end date, end station, end terminal, bike, subscription type, zip code  
+
 Exploratory Data Analaysis
 ========================================================
-```{r, echo = F}
+```{r load packages, echo = F}
 library(data.table)
 library(fields)
 library(dplyr)
@@ -26,35 +32,46 @@ library(raster)
 library(stringr)
 library(ggplot2)
 library(sf)
-trip <- fread("201508_trip_data.csv")
-station <- fread("201508_station_data.csv")
+library(fields)
+library(geoR)
+library(spBayes)
+```
+
+```{r data preparation, echo=FALSE}
+trip <- fread("babs_open_data_year_2/201508_trip_data.csv")
+station <- fread("babs_open_data_year_2/201508_station_data.csv")
+
 df = trip %>%
   mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
   mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
   group_by(`Start Terminal`, date, hour_of_day) %>%
   summarise(`Number of Trips` = n())
 
-# df = trip %>% 
-#   mutate(date = floor_date(mdy_hm(`Start Date`),'day')) %>%
-#   mutate(hour_of_day = hour(mdy_hm(`Start Date`))) %>%
-#   group_by(`End Terminal`, date, hour_of_day) %>%
-#   summarise(`Number of Trips` = n())
-
 agg = merge(df, station, by.x = 'Start Terminal', by.y = 'station_id') %>% mutate(day_of_week = wday(date))
 
-agg2 = agg %>% group_by(`Start Terminal`, day_of_week, hour_of_day, lat, long) %>% summarise(avg = mean(`Number of Trips`))
+agg_day = agg %>% 
+  group_by(`Start Terminal`,date, day_of_week, lat, long) %>%
+  summarise(total = sum(`Number of Trips`)) %>%
+  group_by(`Start Terminal`, day_of_week, lat, long) %>%
+  summarise(avg = mean(total))
 
-agg7_15 = agg2 %>% filter(day_of_week==2 & hour_of_day==10)
+agg_hour = agg %>%
+  group_by(`Start Terminal`, hour_of_day, lat, long) %>% 
+  summarise(avg = mean(`Number of Trips`))
 
-agg3 = agg %>% group_by(`Start Terminal`, lat, long) %>% summarise(avg = mean(`Number of Trips`))
+agg_year = agg %>%
+  group_by(`Start Terminal`, lat, long) %>% 
+  summarise(avg = sum(`Number of Trips`))
+```
 
+```{r get coordinates for prediction, echo=FALSE}
 counties <- map_data("county")
 ca_county <- subset(counties, region == "california")
 bay_name <- c("san francisco", "san mateo","santa clara")
 bay_county <- subset(ca_county,subregion %in% bay_name)
 
 ggplot(bay_county)+geom_polygon(aes(long,lat,group = group, fill = subregion))
-ggplot(agg3, aes(long,lat)) + stat_bin_2d(bins = 50) + 
+ggplot(agg_year, aes(long,lat)) + stat_bin_2d(bins = 50) + 
   xlim(min(bay_county$long), max(bay_county$long)) +
   ylim(min(bay_county$lat), max(bay_county$lat)) +
   scale_fill_gradientn(colours = rev(terrain.colors(6)))
@@ -89,25 +106,139 @@ bay_points <- rasterize(rbind(sf_points,sm_points,sc_points),r)
 cells = which(!is.na(bay_points[]))
 pred_coords = xyFromCell(r, cells)
 
-coords = agg3[,c('long','lat')] %>% as.matrix()
-tps = Tps(x = coords, Y=agg3$avg)
-trip_pred = r
-trip_pred[cells] = predict(tps, pred_coords)
 
 
+```
+
+
+
+Model I: Thin Plate Splines(TPS)
+========================================================
+
+```{r, echo = FALSE}
+# coords = agg3[,c('long','lat')] %>% as.matrix()
+# tps = Tps(x = coords, Y=agg3$avg)
+# trip_pred = r
+# trip_pred[cells] = predict(tps, pred_coords)
 ```
 
 Result of TPS
 ========================================================
 
 ```{r, echo=FALSE}
-plot(trip_pred,cex = 0.8, main = "Average number of trips start")
-points(unique(coords), pch=16, cex=0.5)
+# plot(trip_pred,cex = 0.8, main = "Average number of trips start")
+# points(unique(coords), pch=16, cex=0.5)
 ```
 
 
 Model II: Gaussian Process
 ========================================================
+```{r,echo=FALSE}
+post_summary = function(m, ci_width=0.95)
+{
+  d = data_frame(
+    post_mean  = apply(m, 2, mean),
+    post_med   = apply(m, 2, median),
+    post_lower = apply(m, 2, quantile, probs=(1-ci_width)/2),
+    post_upper = apply(m, 2, quantile, probs=1 - (1-ci_width)/2)
+  )
+  
+  if (!is.null(colnames(m)))
+    d = d %>% mutate(param = colnames(m)) %>% select(param,post_mean:post_upper)
+  
+  d
+}
+```
 
 Result of GPs
 ========================================================
+```{r, echo=FALSE, message = FALSE, warning=FALSE}
+log = capture.output({
+#model for overall
+coords = agg_year[,c('long', 'lat')] %>% as.matrix()
+d = dist(coords) %>% as.matrix()
+# variog(coords = coords, data = overall$total, messages = FALSE, uvec = seq(0, max(d)/4, length.out=50)) %>% plot()
+
+max_range = max(dist(coords)) / 4
+n_samp = 20000
+starting = list(phi = 3/0.025, sigma.sq = 3e7, tau.sq = 1e7)
+tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+priors = list(
+  beta.Norm = list(0, 1000), 
+  phi.Unif = c(3/max_range,200), 
+  sigma.sq.IG = c(2, 2e7), 
+  tau.sq.IG = c(2, 2e7)
+)
+m = spLM(avg ~ 1, data = agg_year, coords = coords, starting = starting, priors = priors, 
+         cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+         n.report = n_samp/2)
+m_pred = spPredict(m, pred_coords, pred.covars = matrix(1, nrow=nrow(pred_coords)), 
+                   start=n_samp/2+1, thin=(n_samp/2)/1000)
+m_pred_summary = post_summary(t(m_pred$p.y.predictive.samples))
+
+splm_pred = r
+splm_pred[cells] = m_pred_summary$post_mean
+
+})
+plot(splm_pred)
+points(coords, pch=16, cex=0.5)
+```
+
+
+Day of Week
+====================================================
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20,fig.height=10}
+#model for dow
+par(mfrow = c(2,4))
+for(i in c(2:6,7,1)){
+  log = capture.output({
+  day = filter(agg_day, day_of_week==i)
+  coords = day[,c('long', 'lat')] %>% as.matrix()
+  d = dist(coords) %>% as.matrix()
+  # variog(coords = coords, data = day$avg, messages = FALSE, uvec = seq(0, max(d)/4, length.out=50)) %>% plot()
+  max_range = max(dist(coords)) / 4
+  n_samp = 20000
+  starting = list(phi = 3/0.025, sigma.sq = 300, tau.sq = 100)
+  tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+  priors = list(
+    beta.Norm = list(0, 1000), 
+    phi.Unif = c(3/max_range,200), 
+    sigma.sq.IG = c(2, 200), 
+    tau.sq.IG = c(2, 200)
+  )
+  m = spLM(avg ~ 1, data = day, coords = coords, starting = starting, priors = priors, 
+         cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+         n.report = n_samp/2)
+
+m_pred = spPredict(m, pred_coords, pred.covars = matrix(1, nrow=nrow(pred_coords)), 
+                   start=n_samp/2+1, thin=(n_samp/2)/1000)
+m_pred_summary = post_summary(t(m_pred$p.y.predictive.samples))
+
+splm_pred = r
+splm_pred[cells] = m_pred_summary$post_mean
+})
+plot(splm_pred)
+points(coords, pch=16, cex=0.5)
+}
+```
+
+Day of Week
+==============================
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20,fig.height=10}
+#model for dow
+par(mfrow = c(2,4))
+for(i in c(2:6,7,1)){
+    log = capture.output({
+    day = filter(agg_day, day_of_week==i)
+    coords = day[,c('long','lat')] %>% as.matrix()
+    tps = Tps(x = coords, Y=day$avg)
+    trip_pred = r
+    pred <- predict(tps, pred_coords)
+    pred[pred<0] <- 0
+    trip_pred[cells] = pred
+    })
+    plot(trip_pred,cex = 0.8)
+    points(coords, pch=16, cex=0.5)
+}
+```
+
