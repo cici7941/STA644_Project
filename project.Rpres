@@ -55,7 +55,9 @@ bay_county <- subset(ca_county,subregion %in% bay_name)
 
 ggplot(bay_county)+geom_polygon(aes(long,lat,group = group, fill = subregion))
 ggplot(agg3, aes(long,lat)) + stat_bin_2d(bins = 50) + 
-  xlim(min(bay_county$long), max(bay_county$long))
+  xlim(min(bay_county$long), max(bay_county$long)) +
+  ylim(min(bay_county$lat), max(bay_county$lat)) +
+  scale_fill_gradientn(colours = rev(terrain.colors(6)))
 
 ```
 
