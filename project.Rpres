@@ -4,6 +4,7 @@ author: SakaiAtMidnight2.0
 date: 
 autosize: true
 
+
 Outline
 ========================================================
 
@@ -36,6 +37,7 @@ library(geoR)
 library(spBayes)
 library(ggplot2)
 library(chron)
+library(gridExtra)
 ```
 
 ```{r data preparation, echo=FALSE, cache=TRUE}
@@ -110,12 +112,22 @@ post_summary = function(m, ci_width=0.95)
 }
 ```
 
-```{r, echo=FALSE}
-ggplot(bay_county)+geom_polygon(aes(long,lat,group = group, fill = subregion))
-ggplot(agg_year, aes(long,lat)) + stat_bin_2d(bins = 50) + 
+```{r, echo=FALSE, fig.width=25, fig.height=10}
+g1 = ggplot(bay_county)+geom_polygon(aes(long,lat,group = group, fill = subregion)) +
+  theme(legend.title = element_text(size=18),legend.text=element_text(size=12))
+g2 = ggplot(agg_year, aes(long,lat)) + stat_bin_2d(bins = 50) + 
   xlim(min(bay_county$long), max(bay_county$long)) +
   ylim(min(bay_county$lat), max(bay_county$lat)) +
-  scale_fill_gradientn(colours = rev(terrain.colors(6)))
+  scale_fill_gradientn(colours = rev(terrain.colors(6))) +
+  theme(legend.title = element_text(size=18),legend.text=element_text(size=12))
+g3 = ggplot() + geom_point(data = agg_year, aes(long,lat,colour = avg)) + 
+  xlim(min(bay_county$long), max(bay_county$long)) +
+  ylim(min(bay_county$lat), max(bay_county$lat)) +
+  labs(color='total') +
+  scale_colour_gradientn(colours = rev(terrain.colors(6)))+
+  theme(legend.title = element_text(size=18),legend.text=element_text(size=12))
+
+grid.arrange(g1,g2,g3, ncol = 3)
 ```
 
 Model I: Gaussian Process
@@ -142,12 +154,52 @@ trip_pred = r
 trip_pred[cells] = predict(tps, pred_coords)
 ```
 
+Overall 
+=============================
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=18, fig.height=10, cache=TRUE}
+par(mfrow = c(1,2), oma=c(4,4,4,4), mar=c(2,4,2,4))
+log = capture.output({
+   coords = agg_year[,c('long','lat')] %>% as.matrix()
+     d = dist(coords) %>% as.matrix()
+   # variog(coords = coords, data = day$avg, messages = FALSE, uvec = seq(0, max(d)/4, length.out=50)) %>% plot()
+   max_range = max(dist(coords)) / 4
+   n_samp = 20000
+   starting = list(phi = 3/0.025, sigma.sq = 3e7, tau.sq = 1e7)
+   tuning = list("phi"=0.1, "sigma.sq"=0.1, "tau.sq"=0.1)
+   priors = list(
+     beta.Norm = list(0, 1000), 
+     phi.Unif = c(3/max_range,200), 
+     sigma.sq.IG = c(2, 2e7), 
+     tau.sq.IG = c(2, 2e7)
+   )
+  m = spLM(avg ~ 1, data = agg_year, coords = coords, starting = starting, priors = priors, 
+          cov.model = "exponential", n.samples = n_samp, tuning = tuning,
+          n.report = n_samp/2)
+ 
+ m_pred = spPredict(m, pred_coords, pred.covars = matrix(1, nrow=nrow(pred_coords)), 
+                    start=n_samp/2+1, thin=(n_samp/2)/1000)
+ m_pred_summary = post_summary(t(m_pred$p.y.predictive.samples))
+ 
+ splm_pred = r
+ splm_pred[cells] = m_pred_summary$post_mean
+     #tps
+     tps = Tps(x = coords, Y=agg_year$avg)
+     trip_pred = r
+     pred <- predict(tps, pred_coords)
+     pred[pred<0] <- 0
+     trip_pred[cells] = pred
+ })
+     plot(splm_pred, main='GP')
+     points(coords, pch=16, cex=0.5)
+     plot(trip_pred,cex = 0.8, main='GP')
+     points(coords, pch=16, cex=0.5)
+```
 
 Day of Week (GP)
 ====================================================
 ```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20, fig.height=10, cache=TRUE}
 #model for dow
-par(mfrow = c(2,4))
+par(mfrow = c(2,4), oma=c(4,4,4,4), mar=c(2,4,2,4))
 for(i in c(2:6,7,1)){
   log = capture.output({
   day = filter(agg_day, day_of_week==i)
@@ -184,7 +236,7 @@ Day of Week (TPS)
 ==============================
 ```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=20, fig.height=10, cache=TRUE}
 #model for dow
-par(mfrow = c(2,4))
+par(mfrow = c(2,4), oma=c(4,4,4,4), mar=c(2,4,2,4))
 for(i in c(2:6,7,1)){
     log = capture.output({
     day = filter(agg_day, day_of_week==i)
@@ -202,9 +254,9 @@ for(i in c(2:6,7,1)){
 
 Hour of Day
 =============================
-```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=18, fig.height=10, cache=TRUE}
-par(mfrow = c(2,4))
-for (i in c(9,13,17,21)){
+```{r, echo=FALSE, message = FALSE, warning=FALSE, fig.width=18, fig.height=5, cache=TRUE}
+par(mfrow = c(1,3), oma=c(4,4,4,4), mar=c(2,4,2,4))
+for (i in c(9,13,21)){
   log = capture.output({
   hour = filter(agg_hour, hour_of_day==i)
   coords = hour[,c('long', 'lat')] %>% as.matrix()
@@ -234,8 +286,9 @@ splm_pred[cells] = m_pred_summary$post_mean
   plot(splm_pred, main=paste0(i, ":00"))
   points(coords, pch=16, cex=0.5)
 }
-#tps
-for (i in c(9,13,17,21)){
+title(main=list("GP", cex=2), outer=TRUE)
+par(mfrow = c(1,3), oma=c(4,4,4,4), mar=c(2,4,2,4))
+for (i in c(9,13,21)){
   agg1 = agg_hour %>% filter(hour_of_day==i)
   coords = agg1[,c('long','lat')] %>% as.matrix()
   tps = Tps(x = coords, Y=agg1$avg)
@@ -246,6 +299,7 @@ for (i in c(9,13,17,21)){
   plot(trip_pred,cex = 0.8, main=paste0(i,":00"))
   points(unique(coords), pch=16, cex=0.5)
 }
+title(main=list("TPS", cex=2), outer=TRUE)
 ```
 
 
