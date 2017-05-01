@@ -1,0 +1,22 @@
+---
+title: "STA 644 Project Report"
+author: "Yaqian Chen, Yulin Lei, Mengrun Li, Leonardo Shu"
+date: "May 1, 2017"
+output: pdf_document
+---
+
+\textbf{Introduction \& Goal} \
+Our aim for this project was to explore the models concerning point reference data and observe how they performed on a scenario of interest to us. Specifically, we wanted to see how Gaussian Process Models and Thin Plate Splines could help us make use of bike trip data in the Bay Area by predicting the locations of where users would most likely start a trip from. In doing so we would be able to see which bike stations are the most popular (in demand) and whether there are other areas they could expand to in order to capture more potential customers.\
+\
+\textbf{Data Description} \
+\
+Mengrun
+\
+\textbf{Thin Plate Splines (TPS)}
+Yulin
+
+\textbf{Gaussian Process Model}
+Cici
+
+\textbf{Model Fits and Interpretation}
+Leo
