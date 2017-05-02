@@ -10,7 +10,9 @@ Our aim for this project was to explore the models concerning point reference da
 \
 \textbf{Data Description} \
 \
-Mengrun
+We downloaded the data from http://www.bayareabikeshare.com/open-data. There are two datasets that we mainly used recorded from 2014/09/01 to 2015/08/31 including station information(station ID, name, latitude, longitude, dockcount, city), trip information(time, start terminal, end terminal, duration in second). There are 70 bike stations located in 5 different Bay Area cities.
+
+The target response variable we defined is the number of trips start from a specific bike station. We combined the two datasets and aggregated into year level, day of week and hour of day level of each station, respectively.
 \
 \textbf{Thin Plate Splines (TPS)}
 Yulin
