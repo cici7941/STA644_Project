@@ -1,6 +1,6 @@
 ---
 title: "STA 644 Project Report"
-author: "Yaqian Chen, Yulin Lei, Mengrun Li, Leonardo Shu"
+author: "Yaqian Cheng, Yulin Lei, Mengrun Li, Leonardo Shu"
 date: "May 1, 2017"
 output: pdf_document
 ---
